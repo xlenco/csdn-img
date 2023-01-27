@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <!-- noreferer -->
+    <meta name="referrer" content="no-referrer" />
+    <link rel="shortcut icon" href="https://file.onmicrosoft.cn/favicon.ico">
+    <meta name="viewport"
+        content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+    <title>简单的 CSDN 上传接口</title>
+    <script src="https://unpkg.onmicrosoft.cn/vue@2.7.14/dist/vue.js"></script>
+    <script src="https://unpkg.onmicrosoft.cn/element-ui@2.15.10/lib/index.js"></script>
+    <link rel="stylesheet" href="https://unpkg.onmicrosoft.cn/element-ui@2.15.10/lib/theme-chalk/index.css" />
+    <script src="https://unpkg.onmicrosoft.cn/dayjs@1.8.21/dayjs.min.js"></script>
+    <script src="https://unpkg.onmicrosoft.cn/axios@1.2.5/dist/axios.min.js"></script>
+    <style>
+        /* 宽带大于750时两栏 */
+        @media screen and (min-width: 750px) {
+            .auto {
+                display: flex;
+                justify-content: space-evenly;
+            }
+        }
+
+        @media screen and (max-width: 750px) {
+            .el-button+.el-button {
+                margin-top: 10px;
+                margin-left: 0;
+            }
+        }
+
+        .demo-table-expand {
+            font-size: 0;
+        }
+
+        .demo-table-expand label {
+            color: #99a9bf;
+        }
+
+        .demo-table-expand .el-form-item {
+            margin-right: 0;
+            margin-bottom: 0;
+            width: 100%;
+            padding-left: 15px;
+        }
+        .info{
+            color: #999;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app" @paste="handlePaste">
+        <center>
+            <div class="auto">
+                <div>
+                    <h2>CSDN 阿里云图床接口</h2>
+                    <p class="info">总计已上传图片{{count}}张</p>
+                    <el-upload ref="oss_uploader" class="upload-demo" drag action="https://csdn-img.onmicrosoft.cn/"
+                        multiple name="file" :before-upload="OSSBeforeUpload" :data="oss_detail" :on-success="OSS_Suc"
+                        drag="true">
+                        <i class="el-icon-upload"></i>
+                        <div class="el-upload__text">
+                            将文件拖到此处，或<em>点击上传</em>
+                        </div>
+                        <div class="el-upload__tip" slot="tip">
+                            只支持png、jpg、jpeg、gif类型的图片上传（支持粘贴图片上传）
+                        </div>
+                    </el-upload>
+                </div>
+            </div>
+
+            <div class="history">
+                <h2>历史记录</h2>
+                <el-table :data="tableData" style="width: 800px" stripe>
+                    <el-table-column prop="url" label="预览" align="center">
+                        <template slot-scope="item">
+                            <el-image style="width: 100px; height: 100px" :src="item.row.url" fit="scale-down"
+                                :preview-src-list="[item.row.url]" lazy>
+                            </el-image>
+                        </template>
+
+                    </el-table-column>
+
+                    <el-table-column prop="url" label="链接" width="500" align="center"></el-table-column>
+                    <el-table-column fixed="right" label="操作" width="160" align="center">
+                        <template slot-scope="scope" align="center">
+                            <el-button @click="handleCopy(scope.row.url, '直链')" type="primary"
+                                size="small">复制</el-button>
+                            <el-button @click="handleDel(scope.row)" type="danger" size="small">删除</el-button>
+                        </template>
+                    </el-table-column>
+                </el-table>
+
+            </div>
+            <!-- {{oss_all}} -->
+
+        </center>
+    </div>
+
+    <script>
+        var Main = {
+            // tableData 从 localstorage 里面取
+            data() {
+                return {
+                    oss_detail: {
+                        "key": "",
+                        "signature": "",
+                        "OSSAccessKeyId": "",
+                        "policy": "",
+                    },
+                    oss_all: {},
+                    tableData: [],
+                    FILE_DICT: {},
+                    count: -1,
+                };
+            },
+            methods: {
+                loadHistory() {
+                    var list = localStorage.getItem("History") ? JSON.parse(localStorage.getItem("History")) : [{ "date": "2023年01月27日 19:18:30", "url": "https://img-blog.csdnimg.cn/3e45127261234440ba21277d356538e2.png", "name": "Screenshot 2023-01-27 at 19.18.16.png" }];
+                    list = list.reverse();
+                    this.tableData = list;
+                },
+                OSSBeforeUpload(file, fileList) {
+                    // 只支持png、jpg、jpeg、gif类型的图片上传
+                    let isJPG = file.type === 'image/jpeg' || file.type === 'image/jpg';
+                    let isPNG = file.type === 'image/png';
+                    let isGIF = file.type === 'image/gif';
+                    if (!isJPG && !isPNG && !isGIF) {
+                        this.$message.error('上传文件图片只能是 JPG、PNG、GIF 格式!');
+                        return false;
+                    }
+                    let _self = this;
+                    let extension = file.name.split(".").pop()
+                    return new Promise((resolve, reject) => {
+                        this.postPolicy(extension)
+                            .then((response) => {
+                                _self.oss_all = response.data.data;
+                                _self.oss_detail.key = response.data.data.filePath;
+                                _self.oss_detail.signature = response.data.data.signature;
+                                _self.oss_detail.OSSAccessKeyId = response.data.data.accessId;
+                                _self.oss_detail.policy = response.data.data.policy;
+                                _self.oss_detail.callback = response.data.data.callbackUrl;
+                                _self.oss_detail.success_action_status = 200;
+                                _self.FILE_DICT[file.uid] = {}
+                                _self.FILE_DICT[file.uid].nickname = JSON.parse(JSON.stringify(file.name))
+                                resolve(true);
+                            })
+                            .catch((err) => {
+                                reject(false);
+                            });
+                    });
+                },
+                OSS_Suc(response, file, fileList) {
+                    let history_item = JSON.parse(localStorage.getItem("History"));
+                    if (history_item == undefined) {
+                        history_item = []
+                    }
+                    let nickname = this.FILE_DICT[file.uid].nickname
+                    history_item.push(
+                        {
+                            "date": dayjs().format('YYYY年MM月DD日 HH:mm:ss'),
+                            "url": response.data.imageUrl,
+                            "name": nickname
+                        }
+                    )
+                    localStorage.setItem("History", JSON.stringify(history_item));
+                    this.loadHistory();
+                },
+                postPolicy(extension) {
+                    return new Promise((resolve, reject) => {
+                        // 上述请求也可以按以下方式完成（可选）
+                        axios.get('https://hub.onmicrosoft.cn/public/pic/csdn.' + extension)
+                            .then(function (response) {
+                                resolve(response);
+                            })
+                            .catch(function (error) {
+                                console.log(error);
+                            })
+                            .then(function () {
+                                // 总是会执行
+                            });
+
+                    });
+                },
+                initPing() {
+                
+                    axios.get('https://hub.onmicrosoft.cn/public/pic/csdn.count')
+                    .then(response => {
+                        this.count = response.data.count;
+                        this.$notify({
+                            title: '成功',
+                            message: '服务器连通性测试成功，当前已有' + this.count + '张图片被托管！',
+                            type: 'success'
+                        });
+                    })
+                    .catch(error => {
+                        console.log(error);
+                    });
+
+            
+                },
+                handleCopy(content, name) {
+
+                    var aux = document.createElement("input");
+                    aux.setAttribute("value", content);
+                    document.body.appendChild(aux);
+                    aux.select();
+                    document.execCommand("copy");
+                    document.body.removeChild(aux);
+                    this.$message({
+                        message: name + ' 🔗 复制成功！',
+                        type: 'success'
+                    });
+                },
+                handleDel(row_data) {
+                    this.$confirm('此操作只是从列表中删除文件, 文件链接仍有效，是否继续?', '提示', {
+                        confirmButtonText: '确定',
+                        cancelButtonText: '取消',
+                        type: 'warning'
+                    }).then(() => {
+                        let history_item = JSON.parse(localStorage.getItem("History"));
+                        let _index;
+                        try {
+                            _index = history_item.findIndex(element => element['url'] === row_data['url']);
+                        } catch (e) {
+                            this.$message({
+                                type: 'warning',
+                                message: '示例图片无需删除，上传新文件即可覆盖。'
+                            });
+                        }
+                        history_item.splice(_index, 1)
+                        localStorage.setItem("History", JSON.stringify(history_item))
+                        this.loadHistory();
+
+                        this.$message({
+                            type: 'success',
+                            message: '删除成功!'
+                        });
+                    }).catch(() => {
+                        this.$message({
+                            type: 'info',
+                            message: '已取消删除'
+                        });
+                    });
+                },
+                // 监听粘贴操作
+                handlePaste(event) {
+                    setTimeout(() => {
+                        this.$message.success("捕获粘贴行为 📋 成功！")
+                    }, 0);
+                    const items = (event.clipboardData || window.clipboardData).items;
+                    let file = null;
+                    if (!items || items.length === 0) {
+                        this.$message.error("当前浏览器不支持本地");
+                        return;
+                    }
+                    // 搜索剪切板items
+                    for (let i = 0; i < items.length; i++) {
+                        if (items[i].type.indexOf("image") !== -1) {
+                            file = items[i].getAsFile();
+                            break;
+                        }
+                    }
+                    if (!file) {
+                        this.$message.error("粘贴内容非图片");
+                        return;
+                    }
+                    this.$message.success("图片上传中...");
+                    this.$refs.oss_uploader.handleStart(file);// 将粘贴过来的图片加入预上传队列
+                    this.$refs.oss_uploader.submit(); // 提交图片上传队列
+                },
+            },
+            created() {
+                this.loadHistory();
+                this.initPing();
+            },
+        };
+        var Vue = Vue.extend(Main);
+
+        new Vue().$mount("#app");
+
+
+
+    </script>
+</body>
+
+</html>
